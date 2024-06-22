@@ -1,6 +1,8 @@
 import pandas as pd
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm
 
 
 class SpotifyManager():
@@ -22,21 +24,23 @@ class SpotifyManager():
     def _get_tracks(self) -> pd.DataFrame:
         offsets = self._build_offset_range(n_songs=self.total_songs)
         data: list[dict] = []
-        for offset in offsets:
-            data.extend(self._get_tracks_page(offset=offset))
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(self._get_tracks_batch, offset) for offset in offsets]
+            for future in tqdm(futures, ncols=80):
+                data.extend(future.result())
         return pd.DataFrame.from_dict(data)
 
-    def _get_tracks_page(self, offset: int) -> list[dict]:
-        page_tracks = []
+    def _get_tracks_batch(self, offset: int) -> list[dict]:
+        batch_tracks = []
         results = self.spotify.current_user_saved_tracks(limit=self.limit, offset=offset)
 
         if not results:
-            return None
+            return []
 
         for item in results['items']:
-            page_tracks.append(self._extract_data_from_request(request_response=item))
+            batch_tracks.append(self._extract_data_from_request(request_response=item))
 
-        return page_tracks
+        return batch_tracks
 
     def _extract_data_from_request(self, request_response: dict) -> dict:
         track = request_response['track']
